@@ -148,12 +148,14 @@ def _to_storage_array(array: pa.Array) -> pa.Array:
 
 def _get_array_to_storage_fn(dtype: pa.DataType):
     if is_dict_encoded_value_factory_type(dtype):
+        print(f"Found struct dict encoded value factory column with type {dtype}")
         storage_fn = _get_array_to_storage_fn(dtype.value_type) or _identity
         return lambda a: storage_fn(a.dictionary_decode())
     elif is_value_factory_type(dtype):
         storage_fn = _get_array_to_storage_fn(dtype.storage_type) or _identity
         return lambda a: storage_fn(a.storage)
     elif kas.is_struct_dict_encoded(dtype):
+        print(f"Found struct dict encoded column with type {dtype}")
         return lambda a: a.dictionary_decode()
     elif is_list_type(dtype):
         value_fn = _get_array_to_storage_fn(dtype.value_type)
@@ -162,6 +164,7 @@ def _get_array_to_storage_fn(dtype: pa.DataType):
         else:
             return lambda a: _create_list_array(a.offsets, _to_storage_array(a.values))
     elif pat.is_struct(dtype):
+        print(f"Found struct column with type {dtype}")
         inner_fns = [_get_array_to_storage_fn(inner.type) for inner in dtype]
         if all(i is None for i in inner_fns):
             return None
@@ -340,6 +343,13 @@ class LogicalTypeExtensionType(pa.ExtensionType):
         return 0
 
     def to_pandas_dtype(self):
+        # if "Geo" in self._logical_type:
+        #     from knime_arrow_geopandas import PandasLogicalGeoTypeExtensionType
+
+        #     return PandasLogicalGeoTypeExtensionType(
+        #         self.storage_type, self._logical_type, self._converter
+        #     )
+        # else:
         from knime_arrow_pandas import PandasLogicalTypeExtensionType
 
         return PandasLogicalTypeExtensionType(
@@ -538,6 +548,9 @@ class KnimeExtensionScalar:
         return unpickle_knime_extension_scalar, (self.ext_type, self.storage_scalar)
 
     def as_py(self):
+        print(type(self.storage_scalar))
+        print(self.storage_scalar)
+        print(self.storage_scalar.as_py())
         return self.ext_type.decode(self.storage_scalar.as_py())
 
 
@@ -683,10 +696,7 @@ def _nulls(num_nulls: int, dtype: pa.DataType):
     # type.
     validbits = np.packbits(np.ones(num_nulls, dtype=np.uint8), bitorder="little")
     return pa.Array.from_buffers(
-        dtype,
-        num_nulls,
-        [pa.py_buffer(validbits)],
-        null_count=num_nulls,
+        dtype, num_nulls, [pa.py_buffer(validbits)], null_count=num_nulls,
     )
 
 
@@ -714,21 +724,23 @@ def _wrap_primitive_array(
             list_data = _create_list_array(offsets, inner_data)
             return pa.ExtensionArray.from_storage(wrapped_type, list_data)
 
-        return _apply_to_array(
-            array,
-            to_list_of_nulls,
-        )
+        return _apply_to_array(array, to_list_of_nulls,)
     else:
         return _apply_to_array(
             array, lambda a: pa.ExtensionArray.from_storage(wrapped_type, a)
         )
 
+
 def _check_is_rowkey(array: pa.Array):
     first_column_type = array.type
-    if not is_value_factory_type(first_column_type) or \
-        first_column_type.storage_type != pa.string() or \
-        first_column_type.logical_type != _row_key_type:
-        raise TypeError("The first column must contain unique row identifiers of type 'string'")
+    if (
+        not is_value_factory_type(first_column_type)
+        or first_column_type.storage_type != pa.string()
+        or first_column_type.logical_type != _row_key_type
+    ):
+        raise TypeError(
+            "The first column must contain unique row identifiers of type 'string'"
+        )
 
 
 def wrap_primitive_arrays(
