@@ -43,13 +43,23 @@ class PyArrowExtensionTypeTest(unittest.TestCase):
         return kap.arrow_data_to_pandas_df(arrow)
 
     def test_load_table(self):
+        print("-------- pyarrow -------------")
         t = self._generate_test_table()
-        print(t[2][0].as_py())
+        print(t[2].to_pylist())
+        # import debugpy
 
-    def test_load_table(self):
-        t = self._generate_test_table()
-        df = self._to_pandas(t)
-        print(df["geometry"][0])
+        # debugpy.listen(5678)
+        # print("Waiting for debugger attach")
+        # debugpy.wait_for_client()
+        # debugpy.breakpoint()
+        # print(t[2][0].as_py())
+
+    # def test_load_df(self):
+    #     print("-------- pandas -------------")
+    #     t = self._generate_test_table()
+    #     df = self._to_pandas(t)
+    #     print(df["geometry"][0])
+    #     print(df["geometry"][0:1][0])
 
 
 if __name__ == "__main__":

@@ -62,6 +62,24 @@ def pandas_df_to_arrow(
         else:
             return pa.table([])
 
+    geo_columns = [
+        c
+        for c, t in zip(data_frame.columns, data_frame.dtypes)
+        if hasattr(t, "name") and t.name == "geometry"
+    ]
+
+    if len(geo_columns) > 0:
+        import geopandas
+
+        gdf = geopandas.GeoDataFrame(data_frame)
+
+        for geo in geo_columns:
+            crs = gdf[geo].crs
+            wkbs = gdf[geo].to_wkb()
+
+            # how do we get the data into pandas/pyarrow from wkb???
+            data_frame[geo] = pd.Series([{"0": w, "1": crs} for w in wkbs], dtype=)
+
     # Convert the index to a str series and prepend to the data_frame
 
     # extract and drop index from DF
@@ -96,19 +114,27 @@ def arrow_data_to_pandas_df(data: Union[pa.Table, pa.RecordBatch]) -> pd.DataFra
     else:
         data_frame = data.to_pandas()
 
-    # geo_columns = [
-    #     c
-    #     for c, t in zip(data.schema.names, data.schema.types)
-    #     if isinstance(t, kat.LogicalTypeExtensionType) and "Geo" in t.logical_type
-    # ]
+    geo_columns = [
+        c
+        for c, t in zip(data.schema.names, data.schema.types)
+        if isinstance(t, kat.LogicalTypeExtensionType) and "Geo" in t.logical_type
+    ]
 
-    # if len(geo_columns) > 0:
-    #     import geopandas
+    if len(geo_columns) > 0:
+        import geopandas
 
-    #     gdf = geopandas.GeoDataFrame(data_frame)
-    #     for geo in geo_columns:
-    #         gdf[geo] = geopandas.GeoSeries.from_wkb(gdf[geo])
-    #     data_frame = gdf
+        for geo in geo_columns:
+            # TODO: handle missing values
+            crss = set([value.crs for value in data_frame[geo] if value is not None])
+            if len(crss) != 1:
+                raise ValueError(
+                    f"Can only work with exactly one reference frame in one column, but got {crss}"
+                )
+
+            data_frame[geo] = geopandas.GeoSeries.from_wkb(
+                [value.wkb if value is not None else None for value in data_frame[geo]],
+                crs=crss.pop(),
+            )
 
     # The first column is interpreted as the index (row keys)
     data_frame.set_index(data_frame.columns[0], inplace=True)
