@@ -1,0 +1,8 @@
+python:
+  - 3.7
+  - 3.8
+#  - 3.9
+#  - 3.10
+
+version_number:
+  - 1 # Increment this whenever you make changes
