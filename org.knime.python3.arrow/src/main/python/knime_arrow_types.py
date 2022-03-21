@@ -173,6 +173,7 @@ def _get_array_to_storage_fn(dtype: pa.DataType):
 
             def _to_storage_struct(struct_array: pa.StructArray):
                 inner = [fn(struct_array.field(i)) for i, fn in enumerate(inner_fns)]
+                print(f"Creating storage struct with inner: {inner}")
                 return pa.StructArray.from_arrays(
                     inner, names=[field.name for field in dtype]
                 )
@@ -424,6 +425,7 @@ class StructDictEncodedLogicalTypeArray(kas.StructDictEncodedArray):
 
     def _getitem(self, index):
         storage = super()._getitem(index)
+        print(f"StructDictEncodedLogicalTypeArray get {index} -> {storage}")
         return KnimeExtensionScalar(self.type.value_factory_type, storage)
 
 
@@ -476,6 +478,9 @@ class KnimeExtensionArray(pa.ExtensionArray):
         storage_scalar = self.storage[idx]
         # TODO return Scalar once there is a customizable ExtensionScalar in pyarrow
         #  to be consistent with other pa.Arrays
+        print(
+            f"KnmeExtensionArray<{_pretty_type_string(self.type)}>.get[{idx}] -> {storage_scalar}"
+        )
         return KnimeExtensionScalar(self.type, storage_scalar)
 
     def to_pylist(self):
@@ -555,6 +560,7 @@ class KnimeExtensionScalar:
 
 
 def unpickle_knime_extension_scalar(ext_type, storage_scalar):
+    print("Unpickling ???")
     return KnimeExtensionScalar(ext_type, storage_scalar)
 
 
