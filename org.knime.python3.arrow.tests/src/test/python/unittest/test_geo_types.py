@@ -37,6 +37,7 @@ class PyArrowExtensionTypeTest(unittest.TestCase):
         sys.path.append(
             "/Users/chaubold/src/knime-geospatial/org.knime.geospatial.python/src/main/python"
         )
+
         kt.register_python_value_factory(
             "geospatial_types",
             "GeoValueFactory",
@@ -52,6 +53,9 @@ class PyArrowExtensionTypeTest(unittest.TestCase):
             }
             """,
         )
+
+        # to register the arrow<->pandas column converters
+        import geospatial_types
 
     def _generate_test_table(self):
         # returns a table with: RowKey, WKT (string) and GeoPoint columns

@@ -41,7 +41,6 @@
 #  may freely choose the license terms applicable to such Node, including
 #  when such Node is propagated with or for interoperation with KNIME.
 # ------------------------------------------------------------------------
-
 from typing import Type, Union
 
 import numpy as np
@@ -51,6 +50,7 @@ import pyarrow as pa
 from pandas.core.dtypes.dtypes import register_extension_dtype
 
 import knime_arrow_types as kat
+import knime_types as kt
 
 
 def pandas_df_to_arrow(
@@ -62,54 +62,10 @@ def pandas_df_to_arrow(
         else:
             return pa.table([])
 
-    # Check for the name geometry without importing geopandas, because geopandas is not necessarily available!
-    geo_columns = [
-        c
-        for c, t in zip(data_frame.columns, data_frame.dtypes)
-        if hasattr(t, "name") and t.name == "geometry"
-    ]
-
-    if len(geo_columns) > 0:
-        import geopandas
-        import geospatial_types as gt
-
-        gdf = geopandas.GeoDataFrame(data_frame)
-
-        for geo in geo_columns:
-            crs = str(gdf[geo].crs)
-            wkbs = gdf[geo].to_wkb()
-
-            # extract the most specific type from the data and decide which value factory to use
-            most_specific_value_factory = (
-                "org.knime.geospatial.core.data.cell.GeoCellValueFactory"
-            )
-            geom_types = set(gdf[geo].geom_type)
-            if len(geom_types) == 1:
-                geom_type = geom_types.pop()
-                geom_to_value_factory = {
-                    "Point": "org.knime.geospatial.core.data.cell.GeoPointCell$ValueFactory",
-                    "Line": "org.knime.geospatial.core.data.cell.GeoLineCell$ValueFactory",
-                    "Polygon": "org.knime.geospatial.core.data.cell.GeoPolygonCell$ValueFactory",
-                    "MultiPoint": "org.knime.geospatial.core.data.cell.GeoMultiPointCell$ValueFactory",
-                    "MultiLine": "org.knime.geospatial.core.data.cell.GeoMultiLineCell$ValueFactory",
-                    "MultiPolygon": "org.knime.geospatial.core.data.cell.GeoMultiPolygonCell$ValueFactory",
-                    # There are more types in shapely like LineString, LinearRing, GeometryCollection, MultiLineString etc.
-                    # If we want to support these, we need corresponding ValueFactories on the Java side.
-                }
-                most_specific_value_factory = geom_to_value_factory[geom_type]
-
-            # how do we get the data into pandas/pyarrow from wkb???
-            dtype = PandasLogicalTypeExtensionType(
-                storage_type=pa.struct([("0", pa.large_binary()), ("1", pa.string())]),
-                logical_type="{"
-                + f'"value_factory_class": "{most_specific_value_factory}"'
-                + "}",
-                converter=gt.GeoValueFactory(),
-            )
-            # TODO: if data_frame is a GeoDataFrame, this issues a warning, convert to pandas dataframe first?
-            data_frame[geo] = pd.Series(
-                [gt.GeoValue(w, crs) for w in wkbs], dtype=dtype, index=data_frame.index
-            )
+    for col_name, col_type in zip(data_frame.columns, data_frame.dtypes):
+        col_converter = kt.get_first_matching_pandas_to_arrow_col_converter(col_type)
+        if col_converter is not None:
+            data_frame[col_name] = col_converter.convert_column(data_frame[col_name])
 
     # Convert the index to a str series and prepend to the data_frame:
     # extract and drop index from DF
@@ -144,29 +100,10 @@ def arrow_data_to_pandas_df(data: Union[pa.Table, pa.RecordBatch]) -> pd.DataFra
     else:
         data_frame = data.to_pandas()
 
-    geo_columns = [
-        c
-        for c, t in zip(data.schema.names, data.schema.types)
-        if isinstance(t, kat.LogicalTypeExtensionType)
-        and "org.knime.geospatial.core" in t.logical_type
-    ]
-
-    if len(geo_columns) > 0:
-        import geopandas
-
-        for geo in geo_columns:
-            # TODO: handle missing values
-            crss = set([value.crs for value in data_frame[geo] if value is not None])
-            if len(crss) != 1:
-                raise ValueError(
-                    f"Can only work with exactly one reference frame in one column, but got {crss}"
-                )
-            crs = crss.pop()
-
-            data_frame[geo] = geopandas.GeoSeries.from_wkb(
-                [value.wkb if value is not None else None for value in data_frame[geo]],
-                crs=crs,
-            )
+    for col_name, col_type in zip(data.schema.names, data.schema.types):
+        col_converter = kt.get_first_matching_arrow_to_pandas_col_converter(col_type)
+        if col_converter is not None:
+            data_frame[col_name] = col_converter.convert_column(data_frame[col_name])
 
     # The first column is interpreted as the index (row keys)
     data_frame.set_index(data_frame.columns[0], inplace=True)
