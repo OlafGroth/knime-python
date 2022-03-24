@@ -76,14 +76,10 @@ def pandas_df_to_arrow(
         gdf = geopandas.GeoDataFrame(data_frame)
 
         for geo in geo_columns:
-            # if gdf[geo].crs is None:
-            #     raise ValueError(
-            #         "Cannot work with geometrical columns without coordinate reference system"
-            #     )
             crs = str(gdf[geo].crs)
-            wkbs = gdf[geo].to_wkb().reset_index(drop=True)
+            wkbs = gdf[geo].to_wkb()
 
-            # TODO: extract the most specific type from the data and decide which value factory to use
+            # extract the most specific type from the data and decide which value factory to use
             most_specific_value_factory = (
                 "org.knime.geospatial.core.data.cell.GeoCellValueFactory"
             )
@@ -111,15 +107,11 @@ def pandas_df_to_arrow(
                 converter=gt.GeoValueFactory(),
             )
             # TODO: if data_frame is a GeoDataFrame, this issues a warning, convert to pandas dataframe first?
-            print(
-                f"... creating pandas series with GeoValues for crs {crs} and wkbs \n{wkbs}"
-            )
             data_frame[geo] = pd.Series(
-                [gt.GeoValue(w, crs) for w in wkbs], dtype=dtype
+                [gt.GeoValue(w, crs) for w in wkbs], dtype=dtype, index=data_frame.index
             )
 
-    # Convert the index to a str series and prepend to the data_frame
-
+    # Convert the index to a str series and prepend to the data_frame:
     # extract and drop index from DF
     row_keys = data_frame.index.to_series().astype(str)
     row_keys.name = "<Row Key>"  # TODO what is the right string?
@@ -226,7 +218,6 @@ class KnimePandasExtensionArray(pdext.ExtensionArray):
         if data is None:
             raise ValueError("Cannot create empty KnimePandasExtensionArray")
 
-        print(f"Creating extension array with data {data}")
         self._data = data
         self._converter = converter
         self._storage_type = storage_type
@@ -268,8 +259,6 @@ class KnimePandasExtensionArray(pdext.ExtensionArray):
         -------
         ExtensionArray
         """
-        print(f"!!!! creating ext array from sequence {scalars}")
-
         if scalars is None:
             raise ValueError("Cannot create KnimePandasExtensionArray from empty data")
 
@@ -316,7 +305,6 @@ class KnimePandasExtensionArray(pdext.ExtensionArray):
         )
 
     def __getitem__(self, item):
-        print(f"--- Called getitem with indexer {item}")
         if isinstance(item, int):
             return self._data[item].as_py()
         elif isinstance(item, slice):
@@ -358,7 +346,6 @@ class KnimePandasExtensionArray(pdext.ExtensionArray):
         -------
         None
         """
-        print(f"+++ Called setitem with indexer {item} and values {value}")
 
         def _apply_to_array(array, func):
             if isinstance(array, pa.ChunkedArray):
@@ -470,7 +457,6 @@ class KnimePandasExtensionArray(pdext.ExtensionArray):
         return self._data.nbytes
 
     def isna(self):
-        print("Calling ISNA")
         # needed for pandas ExtensionArray API
         if isinstance(self._data, pa.ChunkedArray):
             return np.concatenate(
@@ -520,15 +506,6 @@ class KnimePandasExtensionArray(pdext.ExtensionArray):
         numpy.take
         api.extensions.take
         """
-        print(f"Calling TAKE with indices {indices}")
-
-        import debugpy
-
-        debugpy.listen(5678)
-        print("Waiting for debugger attach")
-        debugpy.wait_for_client()
-        debugpy.breakpoint()
-
         storage = kat._to_storage_array(
             self._data
         )  # decodes the data puts it in storage array
@@ -571,7 +548,6 @@ class KnimePandasExtensionArray(pdext.ExtensionArray):
 
     @classmethod
     def _concat_same_type(cls, to_concat):
-        print("Calling CONCATENATE")
         # needed for pandas ExtensionArray API
         if len(to_concat) < 1:
             raise ValueError("Nothing to concatenate")

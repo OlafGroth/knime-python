@@ -39,7 +39,7 @@ class PyArrowExtensionTypeTest(unittest.TestCase):
         )
         kt.register_python_value_factory(
             "geospatial_types",
-            "GeoPointValueFactory",
+            "GeoValueFactory",
             '{"type": "struct", "inner_types": ["variable_width_binary", "string"]}',
             """
             {
@@ -67,18 +67,17 @@ class PyArrowExtensionTypeTest(unittest.TestCase):
     def _to_pandas(self, arrow):
         return kap.arrow_data_to_pandas_df(arrow)
 
-    # def test_load_table(self):
-    #     print("-------- pyarrow -------------")
-    #     t = self._generate_test_table()
-    #     # print(t[2].to_pylist())
-    #     # print(t[2][0].as_py())
+    def test_load_table(self):
+        print("-------- pyarrow -------------")
+        t = self._generate_test_table()
+        # print(t[2].to_pylist())
+        # print(t[2][0].as_py())
 
     def test_load_df(self):
         print("-------- pandas -------------")
         t = self._generate_test_table()
         df = self._to_pandas(t)
 
-        # print(df["geometry"][0:1][0])
         from shapely.geometry import Point
         import geopandas
 
@@ -86,27 +85,25 @@ class PyArrowExtensionTypeTest(unittest.TestCase):
         if use_geodf:
             df = geopandas.GeoDataFrame(df)
 
-        value = df["geometry"][0]
-        print(f"columns={df.columns}")
-        print(df.dtypes)
-        print(f"### before: {df['geometry'].crs}")
-        df.loc[len(df)] = ["testPoint", Point(12, 34)]
-        # df = df.append(
-        #     geopandas.GeoDataFrame(
-        #         [["testPoint", Point(12, 34)]], columns=["column1", "geometry"]
-        #     ),
-        #     ignore_index=True,
-        # )
-        print(f"### after: {df['geometry'].crs}")
+        # Appending this way keeps the CRS
+        df = df.append(
+            geopandas.GeoDataFrame(
+                [["testPoint", Point(12, 34)]], columns=["column1", "geometry"]
+            ),
+            ignore_index=True,
+        )
 
         if use_geodf:
+            # appending a Point directly only works if it's a GeoDataFrame,
+            # but it drops the CRS and we get a deprecation warning from shapely
+            df.loc[len(df)] = ["testPoint2", Point(654, 23)]
             df = pd.DataFrame(df)
 
-        print(df.dtypes)
-        print(df)
-
         out_t = kap.pandas_df_to_arrow(df)
-        print(out_t)
+        self.assertEqual(Point(30, 10), out_t[2][0].as_py().to_shapely())
+        self.assertEqual(Point(12, 34), out_t[2][1].as_py().to_shapely())
+        if use_geodf:
+            self.assertEqual(Point(654, 23), out_t[2][2].as_py().to_shapely())
 
 
 if __name__ == "__main__":
