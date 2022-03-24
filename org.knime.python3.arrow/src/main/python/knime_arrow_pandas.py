@@ -62,6 +62,7 @@ def pandas_df_to_arrow(
         else:
             return pa.table([])
 
+    # Check for the name geometry without importing geopandas, because geopandas is not necessarily available!
     geo_columns = [
         c
         for c, t in zip(data_frame.columns, data_frame.dtypes)
@@ -70,15 +71,52 @@ def pandas_df_to_arrow(
 
     if len(geo_columns) > 0:
         import geopandas
+        import geospatial_types as gt
 
         gdf = geopandas.GeoDataFrame(data_frame)
 
         for geo in geo_columns:
-            crs = gdf[geo].crs
-            wkbs = gdf[geo].to_wkb()
+            # if gdf[geo].crs is None:
+            #     raise ValueError(
+            #         "Cannot work with geometrical columns without coordinate reference system"
+            #     )
+            crs = str(gdf[geo].crs)
+            wkbs = gdf[geo].to_wkb().reset_index(drop=True)
+
+            # TODO: extract the most specific type from the data and decide which value factory to use
+            most_specific_value_factory = (
+                "org.knime.geospatial.core.data.cell.GeoCellValueFactory"
+            )
+            geom_types = set(gdf[geo].geom_type)
+            if len(geom_types) == 1:
+                geom_type = geom_types.pop()
+                geom_to_value_factory = {
+                    "Point": "org.knime.geospatial.core.data.cell.GeoPointCell$ValueFactory",
+                    "Line": "org.knime.geospatial.core.data.cell.GeoLineCell$ValueFactory",
+                    "Polygon": "org.knime.geospatial.core.data.cell.GeoPolygonCell$ValueFactory",
+                    "MultiPoint": "org.knime.geospatial.core.data.cell.GeoMultiPointCell$ValueFactory",
+                    "MultiLine": "org.knime.geospatial.core.data.cell.GeoMultiLineCell$ValueFactory",
+                    "MultiPolygon": "org.knime.geospatial.core.data.cell.GeoMultiPolygonCell$ValueFactory",
+                    # There are more types in shapely like LineString, LinearRing, GeometryCollection, MultiLineString etc.
+                    # If we want to support these, we need corresponding ValueFactories on the Java side.
+                }
+                most_specific_value_factory = geom_to_value_factory[geom_type]
 
             # how do we get the data into pandas/pyarrow from wkb???
-            data_frame[geo] = pd.Series([{"0": w, "1": crs} for w in wkbs], dtype=)
+            dtype = PandasLogicalTypeExtensionType(
+                storage_type=pa.struct([("0", pa.large_binary()), ("1", pa.string())]),
+                logical_type="{"
+                + f'"value_factory_class": "{most_specific_value_factory}"'
+                + "}",
+                converter=gt.GeoValueFactory(),
+            )
+            # TODO: if data_frame is a GeoDataFrame, this issues a warning, convert to pandas dataframe first?
+            print(
+                f"... creating pandas series with GeoValues for crs {crs} and wkbs \n{wkbs}"
+            )
+            data_frame[geo] = pd.Series(
+                [gt.GeoValue(w, crs) for w in wkbs], dtype=dtype
+            )
 
     # Convert the index to a str series and prepend to the data_frame
 
@@ -117,7 +155,8 @@ def arrow_data_to_pandas_df(data: Union[pa.Table, pa.RecordBatch]) -> pd.DataFra
     geo_columns = [
         c
         for c, t in zip(data.schema.names, data.schema.types)
-        if isinstance(t, kat.LogicalTypeExtensionType) and "Geo" in t.logical_type
+        if isinstance(t, kat.LogicalTypeExtensionType)
+        and "org.knime.geospatial.core" in t.logical_type
     ]
 
     if len(geo_columns) > 0:
@@ -130,10 +169,11 @@ def arrow_data_to_pandas_df(data: Union[pa.Table, pa.RecordBatch]) -> pd.DataFra
                 raise ValueError(
                     f"Can only work with exactly one reference frame in one column, but got {crss}"
                 )
+            crs = crss.pop()
 
             data_frame[geo] = geopandas.GeoSeries.from_wkb(
                 [value.wkb if value is not None else None for value in data_frame[geo]],
-                crs=crss.pop(),
+                crs=crs,
             )
 
     # The first column is interpreted as the index (row keys)
@@ -185,6 +225,8 @@ class KnimePandasExtensionArray(pdext.ExtensionArray):
     ):
         if data is None:
             raise ValueError("Cannot create empty KnimePandasExtensionArray")
+
+        print(f"Creating extension array with data {data}")
         self._data = data
         self._converter = converter
         self._storage_type = storage_type
@@ -226,6 +268,8 @@ class KnimePandasExtensionArray(pdext.ExtensionArray):
         -------
         ExtensionArray
         """
+        print(f"!!!! creating ext array from sequence {scalars}")
+
         if scalars is None:
             raise ValueError("Cannot create KnimePandasExtensionArray from empty data")
 
@@ -272,17 +316,18 @@ class KnimePandasExtensionArray(pdext.ExtensionArray):
         )
 
     def __getitem__(self, item):
+        print(f"--- Called getitem with indexer {item}")
         if isinstance(item, int):
             return self._data[item].as_py()
         elif isinstance(item, slice):
+            # TODO: we might want to return a view instead of a copy here,
+            #       because pandas also returns views on the original data!
             (start, stop, step) = item.indices(len(self._data))
-            # if step == 1:
-            #     return self._data.slice(offset=start, length=stop - start)
-
             indices = list(range(start, stop, step))
             return self.take(indices)
         elif isinstance(item, list):
-            # fetch objects at the individual indices
+            # TODO: we might want to return a view instead of a copy here,
+            #       because pandas also returns views on the original data!
             return self.take(item)
         elif isinstance(item, np.ndarray):
             # masked array
@@ -313,6 +358,7 @@ class KnimePandasExtensionArray(pdext.ExtensionArray):
         -------
         None
         """
+        print(f"+++ Called setitem with indexer {item} and values {value}")
 
         def _apply_to_array(array, func):
             if isinstance(array, pa.ChunkedArray):
@@ -424,6 +470,7 @@ class KnimePandasExtensionArray(pdext.ExtensionArray):
         return self._data.nbytes
 
     def isna(self):
+        print("Calling ISNA")
         # needed for pandas ExtensionArray API
         if isinstance(self._data, pa.ChunkedArray):
             return np.concatenate(
@@ -473,6 +520,15 @@ class KnimePandasExtensionArray(pdext.ExtensionArray):
         numpy.take
         api.extensions.take
         """
+        print(f"Calling TAKE with indices {indices}")
+
+        import debugpy
+
+        debugpy.listen(5678)
+        print("Waiting for debugger attach")
+        debugpy.wait_for_client()
+        debugpy.breakpoint()
+
         storage = kat._to_storage_array(
             self._data
         )  # decodes the data puts it in storage array
@@ -497,6 +553,7 @@ class KnimePandasExtensionArray(pdext.ExtensionArray):
             taken = pa.array(taken, type=self._storage_type, mask=null_mask)
 
         else:
+            # TODO: test wether we can write to the resulting taken array and modify the original data!
             taken = storage.take(indices)
         wrapped = kat._to_extension_array(taken, self._data.type)
 
@@ -514,6 +571,7 @@ class KnimePandasExtensionArray(pdext.ExtensionArray):
 
     @classmethod
     def _concat_same_type(cls, to_concat):
+        print("Calling CONCATENATE")
         # needed for pandas ExtensionArray API
         if len(to_concat) < 1:
             raise ValueError("Nothing to concatenate")
