@@ -148,14 +148,12 @@ def _to_storage_array(array: pa.Array) -> pa.Array:
 
 def _get_array_to_storage_fn(dtype: pa.DataType):
     if is_dict_encoded_value_factory_type(dtype):
-        print(f"Found struct dict encoded value factory column with type {dtype}")
         storage_fn = _get_array_to_storage_fn(dtype.value_type) or _identity
         return lambda a: storage_fn(a.dictionary_decode())
     elif is_value_factory_type(dtype):
         storage_fn = _get_array_to_storage_fn(dtype.storage_type) or _identity
         return lambda a: storage_fn(a.storage)
     elif kas.is_struct_dict_encoded(dtype):
-        print(f"Found struct dict encoded column with type {dtype}")
         return lambda a: a.dictionary_decode()
     elif is_list_type(dtype):
         value_fn = _get_array_to_storage_fn(dtype.value_type)
@@ -164,7 +162,6 @@ def _get_array_to_storage_fn(dtype: pa.DataType):
         else:
             return lambda a: _create_list_array(a.offsets, _to_storage_array(a.values))
     elif pat.is_struct(dtype):
-        print(f"Found struct column with type {dtype}")
         inner_fns = [_get_array_to_storage_fn(inner.type) for inner in dtype]
         if all(i is None for i in inner_fns):
             return None
@@ -173,7 +170,6 @@ def _get_array_to_storage_fn(dtype: pa.DataType):
 
             def _to_storage_struct(struct_array: pa.StructArray):
                 inner = [fn(struct_array.field(i)) for i, fn in enumerate(inner_fns)]
-                print(f"Creating storage struct with inner: {inner}")
                 return pa.StructArray.from_arrays(
                     inner, names=[field.name for field in dtype]
                 )
@@ -425,7 +421,6 @@ class StructDictEncodedLogicalTypeArray(kas.StructDictEncodedArray):
 
     def _getitem(self, index):
         storage = super()._getitem(index)
-        print(f"StructDictEncodedLogicalTypeArray get {index} -> {storage}")
         return KnimeExtensionScalar(self.type.value_factory_type, storage)
 
 
@@ -478,9 +473,6 @@ class KnimeExtensionArray(pa.ExtensionArray):
         storage_scalar = self.storage[idx]
         # TODO return Scalar once there is a customizable ExtensionScalar in pyarrow
         #  to be consistent with other pa.Arrays
-        print(
-            f"KnmeExtensionArray<{_pretty_type_string(self.type)}>.get[{idx}] -> {storage_scalar}"
-        )
         return KnimeExtensionScalar(self.type, storage_scalar)
 
     def to_pylist(self):
@@ -553,14 +545,10 @@ class KnimeExtensionScalar:
         return unpickle_knime_extension_scalar, (self.ext_type, self.storage_scalar)
 
     def as_py(self):
-        print(type(self.storage_scalar))
-        print(self.storage_scalar)
-        print(self.storage_scalar.as_py())
         return self.ext_type.decode(self.storage_scalar.as_py())
 
 
 def unpickle_knime_extension_scalar(ext_type, storage_scalar):
-    print("Unpickling ???")
     return KnimeExtensionScalar(ext_type, storage_scalar)
 
 

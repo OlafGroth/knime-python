@@ -498,9 +498,6 @@ class StructDictEncodedArray(_AbstractArray, pa.ExtensionArray):
         if self.storage.is_null()[index].as_py():
             return self._null_value()
 
-        print(
-            f"StructDictEncoded - return value {self._dict_values()[self._value_index(index)]} at index {index}"
-        )
         return self._dict_values()[self._value_index(index)]
 
     def _null_value(self):
@@ -551,7 +548,6 @@ class StructDictEncodedArray(_AbstractArray, pa.ExtensionArray):
     def dictionary_decode(self):
         # TODO use a more sophisticated mechanism. Maybe we can convert this to an (Arrow)dictionary encoded array
         py_list = self.to_pylist()
-        print(f"Returning pylist {py_list}")
         return pa.array(py_list, type=self._value_type())
 
 
