@@ -309,13 +309,12 @@ public final class Python3KernelBackend implements PythonKernelBackend {
             // outside of eclipse using only KNIME + their favorite Python editor.
             // TODO: Also figure out how we can support debugpy in addition to pydev.
             // m_proxy.enableDebugging();
-        } catch (final Throwable th) { // NOSONAR We cannot risk leaking the Python process or any other held resources.
+        } catch (IOException ex) {
+            throw ex;
+        } catch (final Exception th) { // NOSONAR We cannot risk leaking the Python process or any other held resources.
+            throw new IOException(th);
+        } finally {
             close();
-            if (th instanceof Error || th instanceof IOException) {
-                throw th;
-            } else {
-                throw new IOException(th);
-            }
         }
     }
 
